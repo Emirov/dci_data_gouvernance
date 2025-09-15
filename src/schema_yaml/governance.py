@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import yaml
 
 
@@ -26,8 +26,21 @@ def _dbt_tests_from_rules(rules: Dict[str, Any]) -> List[Any]:
     return tests
 
 
-def governance_to_dbt(doc: Dict[str, Any]) -> tuple[str, str]:
-    """Return (yaml_text, filename) for dbt from governance-style doc."""
+def governance_to_dbt(doc: Dict[str, Any]) -> Tuple[str, str]:
+    """Return (yaml_text, filename) for dbt from governance-style doc.
+
+    Supports two shapes:
+      1) Multi-table governance file:
+         { "tables": [ { "name": ..., "columns": [...]} ] }
+         -> returns schema.yml (models entries)
+      2) Single dataset governance file:
+         {
+           "dataset": {"kind": "source"|"model", "name": ..., "domain": ..., "database": ..., "schema": ...},
+           "columns": [...]
+         }
+         -> returns sources.yml (if kind == source) or schema.yml (if kind != source)
+    """
+    # Case 1: Multi-table governance "tables" (treat as dbt models)
     if "tables" in doc:
         models = []
         for table in doc.get("tables", []):
@@ -47,6 +60,7 @@ def governance_to_dbt(doc: Dict[str, Any]) -> tuple[str, str]:
         out = {"version": 2, "models": models}
         return yaml.safe_dump(out, sort_keys=False, allow_unicode=True), "schema.yml"
 
+    # Case 2: Single dataset governance
     ds = doc.get("dataset", {})
     cols = doc.get("columns", [])
     root_key = "sources" if ds.get("kind") == "source" else "models"
@@ -113,7 +127,7 @@ def _ge_for_columns(name: str, columns: List[Dict[str, Any]]) -> str:
             )
         if "accepted_range" in rules:
             r = rules["accepted_range"] or {}
-            kwargs = {"column": col_name}
+            kwargs: Dict[str, Any] = {"column": col_name}
             if "min" in r:
                 kwargs["min_value"] = r["min"]
             if "max" in r:
@@ -136,7 +150,12 @@ def _ge_for_columns(name: str, columns: List[Dict[str, Any]]) -> str:
 
 
 def governance_to_ge(doc: Dict[str, Any]) -> Dict[str, str]:
-    """Return mapping of table name to GE YAML."""
+    """Return mapping of table name -> Great Expectations suite YAML.
+
+    Supports both:
+      - Multi-table governance (returns one suite per table)
+      - Single dataset governance (returns one suite for dataset name)
+    """
     if "tables" in doc:
         out: Dict[str, str] = {}
         for table in doc.get("tables", []):
@@ -148,17 +167,26 @@ def governance_to_ge(doc: Dict[str, Any]) -> Dict[str, str]:
 
 
 def emit_from_governance(path: Path, out_dir: Path, emit: List[str]) -> Path:
+    """Read a governance YAML and emit dbt and/or GE YAML files.
+
+    Args:
+        path: Path to governance YAML input.
+        out_dir: Output directory.
+        emit: List including "dbt" and/or "ge".
+    """
     doc = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     out_dir.mkdir(parents=True, exist_ok=True)
+
     if "dbt" in emit:
         dbt_dir = out_dir / "dbt"
         dbt_dir.mkdir(parents=True, exist_ok=True)
         dbt_text, fname = governance_to_dbt(doc)
         dbt_dir.joinpath(fname).write_text(dbt_text, encoding="utf-8")
+
     if "ge" in emit:
         ge_dir = out_dir / "ge"
         ge_dir.mkdir(parents=True, exist_ok=True)
         for name, text in governance_to_ge(doc).items():
             ge_dir.joinpath(f"{name}_suite.yml").write_text(text, encoding="utf-8")
-    return out_dir
 
+    return out_dir

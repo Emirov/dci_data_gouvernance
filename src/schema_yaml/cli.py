@@ -10,7 +10,6 @@ def main():
     parser = argparse.ArgumentParser(description="Infer schemas or emit dbt/GE YAML from governance.")
     parser.add_argument("--data", type=str, default="./data", help="Input folder with files")
     parser.add_argument("--config", type=str, default=None, help="YAML config that lists files to scan")
-    parser.add_argument("--governance", type=str, default=None, help="Schema/governance YAML to emit from")
     parser.add_argument("--emit", type=str, default="", help="Comma-separated outputs to emit (dbt,ge)")
     parser.add_argument("--out", type=str, default="./out", help="Output folder for YAML")
     args = parser.parse_args()
