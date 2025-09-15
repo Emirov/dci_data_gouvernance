@@ -122,6 +122,8 @@ session_data/
 # Uploaded files (sensitive data)
 uploads/*.xlsx
 uploads/*.xls
+data/*.*
+out/*.*
 
 # Logs
 logs/
