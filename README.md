@@ -11,6 +11,7 @@ Utility to either:
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+$env:PYTHONPATH = "$PWD\src"
 python -m schema_yaml.cli --data ./data --out ./out
 # or after editable install:
 # schema-yaml --data ./data --out ./out
@@ -40,9 +41,6 @@ columns:
       unique: true
 ```
 
-An example `governance.yaml` with additional column rules lives in the repository root.
-
-Generate dbt v2 YAML (sources/models) and Great Expectations suites:
 
 ```bash
 python -m schema_yaml.cli --governance governance.yaml --emit dbt,ge --out ./out
