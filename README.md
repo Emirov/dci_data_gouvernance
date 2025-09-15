@@ -41,7 +41,6 @@ columns:
       unique: true
 ```
 
-Generate dbt v2 YAML (sources/models) and Great Expectations suites:
 
 ```bash
 python -m schema_yaml.cli --governance governance.yaml --emit dbt,ge --out ./out
