@@ -1,9 +1,11 @@
-
 # schema-yaml-starter
 
-Simple tool that scans `./data`, infers column names & types using Polars (fallback to Pandas for Excel), and writes YAML schema(s) to `./out`.
+Utility to either:
 
-## Quickstart
+* scan `./data`, infer column names & types using Polars (fallback to Pandas for Excel), and write schema YAMLs
+* or read an authoritative `governance.yaml` and emit dbt/Great Expectations YAML for data-quality tests
+
+## Quickstart – infer schemas from data
 
 ```bash
 python -m venv .venv
@@ -14,10 +16,37 @@ python -m schema_yaml.cli --data ./data --out ./out
 # schema-yaml --data ./data --out ./out
 ```
 
-## Output
-- One YAML per table: `./out/<table>.schema.yaml`
-- One combined YAML: `./out/_all_schemas.yaml`
+### Output
+* One YAML per table: `./out/<table>.schema.yaml`
+* One combined YAML: `./out/_all_schemas.yaml`
 
-## Supported inputs
-- CSV, XLSX
-- (Parquet supported if your env has pyarrow/fastparquet)
+### Supported inputs
+* CSV, XLSX
+* (Parquet supported if your env has pyarrow/fastparquet)
+
+## Governance → dbt/GE emission
+
+Maintain validation rules in a neutral `governance.yaml`:
+
+```yaml
+dataset:
+  kind: source
+  domain: raw
+  name: customers
+columns:
+  - name: customer_id
+    rules:
+      not_null: true
+      unique: true
+```
+
+An example `governance.yaml` with additional column rules lives in the repository root.
+
+Generate dbt v2 YAML (sources/models) and Great Expectations suites:
+
+```bash
+python -m schema_yaml.cli --governance governance.yaml --emit dbt,ge --out ./out
+```
+
+This writes `out/dbt/` and `out/ge/` directories containing the respective YAML files.
+
