@@ -1,14 +1,15 @@
 
 from pathlib import Path
 import yaml
+import pandas as pd
 from schema_yaml.inspector import inspect_folder, render_yaml, write_outputs
 
+
 def test_inspect_folder(tmp_path: Path):
-    data_src = Path('/mnt/data/schema_yaml_starter/data')
     work = tmp_path / "data"
     work.mkdir()
-    (work / "customers.csv").write_text((data_src / "customers.csv").read_text(encoding="utf-8"), encoding="utf-8")
-    (work / "orders.csv").write_text((data_src / "orders.csv").read_text(encoding="utf-8"), encoding="utf-8")
+    (work / "customers.csv").write_text("customer_id,email\n1,test@example.com\n", encoding="utf-8")
+    (work / "orders.csv").write_text("order_id,amount\n1,10.0\n", encoding="utf-8")
 
     pairs = inspect_folder(work)
     names = [t for t, _ in pairs]
@@ -37,14 +38,14 @@ def test_write_outputs(tmp_path: Path):
 
 
 def test_config_mode(tmp_path: Path):
-    # Copy sample files
-    src_base = Path('/mnt/data/schema_yaml_starter')
     tmp_data = tmp_path / "data"
     tmp_data.mkdir()
-    for name in ["customers.csv", "customers.xlsx", "orders.csv"]:
-        (tmp_data / name).write_bytes((src_base / "data" / name).read_bytes())
+    # create sample csv and xlsx
+    (tmp_data / "customers.csv").write_text("customer_id,email\n1,test@example.com\n", encoding="utf-8")
+    df = pd.DataFrame({"customer_id": [1], "email": ["a@b.com"]})
+    df.to_excel(tmp_data / "customers.xlsx", index=False)
+    (tmp_data / "orders.csv").write_text("order_id,amount\n1,5.0\n", encoding="utf-8")
 
-    # Write a config
     cfg = {
         "version": 1,
         "base_dir": str(tmp_data),
@@ -57,11 +58,9 @@ def test_config_mode(tmp_path: Path):
     cfg_path = tmp_path / "sources.yaml"
     cfg_path.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
-    # Import here to avoid global path confusion
     from schema_yaml.inspector import inspect_from_config
     pairs = inspect_from_config(cfg_path)
     names = [t for t, _ in pairs]
-    # Expect at least these
     assert "customers" in names
     assert "customers_xlsx" in names
     assert "orders" in names
