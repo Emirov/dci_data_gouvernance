@@ -9,6 +9,7 @@ Simple tool that scans `./data`, infers column names & types using Polars (fallb
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+$env:PYTHONPATH = "$PWD\src"
 python -m schema_yaml.cli --data ./data --out ./out
 # or after editable install:
 # schema-yaml --data ./data --out ./out
