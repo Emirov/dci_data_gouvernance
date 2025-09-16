@@ -1,18 +1,155 @@
+"""Helpers to translate governance YAML into dbt and Great Expectations outputs."""
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
+
 import yaml
 
 
+KNOWN_RANGE_KEYS = (
+    "accepted_range",
+    "range",
+    "between",
+    "expect_column_values_to_be_between",
+    "dbt_expectations.expect_column_values_to_be_between",
+)
+
+KNOWN_REGEX_KEYS = ("regex", "pattern", "match", "matches", "expression")
+
+KNOWN_NOT_NULL_KEYS = (
+    "not_null",
+    "notnull",
+    "expect_column_values_to_not_be_null",
+)
+
+KNOWN_UNIQUE_KEYS = (
+    "unique",
+    "distinct",
+    "expect_column_values_to_be_unique",
+)
+
+
+def _first_value(mapping: Dict[str, Any], keys: Iterable[str]) -> Any:
+    """Return the first non-null value within ``mapping`` for the given keys."""
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
+
+
+def _merge_range(target: Dict[str, Any], value: Any) -> None:
+    """Normalize range-like inputs and merge them into ``target``."""
+    if isinstance(value, dict):
+        min_val = _first_value(value, ("min", "min_value", "gte", "lower_bound"))
+        max_val = _first_value(value, ("max", "max_value", "lte", "upper_bound"))
+    elif isinstance(value, (list, tuple)) and len(value) == 2:
+        min_val, max_val = value
+    else:
+        min_val = max_val = None
+
+    range_spec: Dict[str, Any] = {}
+    if min_val is not None:
+        range_spec["min"] = min_val
+    if max_val is not None:
+        range_spec["max"] = max_val
+
+    if not range_spec:
+        return
+
+    existing = target.get("accepted_range", {})
+    existing.update(range_spec)
+    target["accepted_range"] = existing
+
+
+def _apply_rule(result: Dict[str, Any], key: str, value: Any) -> None:
+    """Map a rule key/value pair into the normalized ``result`` dictionary."""
+    if key is None:
+        return
+
+    lowered = str(key).lower()
+    if lowered in KNOWN_NOT_NULL_KEYS:
+        if value is not False:
+            result["not_null"] = True
+        return
+
+    if lowered in KNOWN_UNIQUE_KEYS:
+        if value is not False:
+            result["unique"] = True
+        return
+
+    if lowered in KNOWN_RANGE_KEYS:
+        _merge_range(result, value)
+        return
+
+    if lowered in KNOWN_REGEX_KEYS:
+        if isinstance(value, dict):
+            regex_value = _first_value(value, KNOWN_REGEX_KEYS)
+        else:
+            regex_value = value
+        if regex_value:
+            result["regex"] = regex_value
+        return
+
+
+def _normalize_rules(column: Dict[str, Any]) -> Dict[str, Any]:
+    """Flatten rule variants on ``column`` into a canonical dictionary."""
+    result: Dict[str, Any] = {}
+
+    # First, check for explicit rule collections.
+    raw_rules = None
+    for candidate in ("rules", "tests", "constraints"):
+        if candidate in column and column[candidate]:
+            raw_rules = column[candidate]
+            break
+
+    if raw_rules:
+        if isinstance(raw_rules, dict):
+            for key, value in raw_rules.items():
+                _apply_rule(result, key, value)
+        elif isinstance(raw_rules, list):
+            for item in raw_rules:
+                if isinstance(item, str):
+                    _apply_rule(result, item, True)
+                elif isinstance(item, dict):
+                    for key, value in item.items():
+                        _apply_rule(result, key, value)
+
+    # Fall back to column-level hints when no rule collection is provided.
+    if column.get("unique") or column.get("distinct"):
+        result["unique"] = True
+    if column.get("not_null") or column.get("nullable") is False:
+        result["not_null"] = True
+
+    range_hint = {
+        "min": _first_value(column, ("min", "min_value", "gte", "lower_bound")),
+        "max": _first_value(column, ("max", "max_value", "lte", "upper_bound")),
+    }
+    range_hint = {k: v for k, v in range_hint.items() if v is not None}
+    if range_hint:
+        existing = result.get("accepted_range", {})
+        existing.update(range_hint)
+        result["accepted_range"] = existing
+
+    regex_hint = column.get("regex") or column.get("pattern")
+    if regex_hint:
+        result["regex"] = regex_hint
+
+    return result
+
+
 def _dbt_tests_from_rules(rules: Dict[str, Any]) -> List[Any]:
+    """Create a dbt test configuration list for the given ``rules``."""
     tests: List[Any] = []
     if not rules:
         return tests
+
     if rules.get("not_null"):
         tests.append("not_null")
     if rules.get("unique"):
         tests.append("unique")
+
     if "accepted_range" in rules:
         r = rules["accepted_range"] or {}
         params: Dict[str, Any] = {}
@@ -20,12 +157,35 @@ def _dbt_tests_from_rules(rules: Dict[str, Any]) -> List[Any]:
             params["min_value"] = r["min"]
         if "max" in r:
             params["max_value"] = r["max"]
-        tests.append({"dbt_expectations.expect_column_values_to_be_between": params})
+        if params:
+            tests.append(
+                {"dbt_expectations.expect_column_values_to_be_between": params}
+            )
+
     if "regex" in rules:
         tests.append(
-            {"dbt_expectations.expect_column_values_to_match_regex": {"regex": rules["regex"]}}
+            {
+                "dbt_expectations.expect_column_values_to_match_regex": {
+                    "regex": rules["regex"]
+                }
+            }
         )
     return tests
+
+
+def _dbt_columns(columns: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build the list of dbt column dictionaries with attached tests."""
+    rendered: List[Dict[str, Any]] = []
+    for column in columns:
+        entry: Dict[str, Any] = {
+            "name": column.get("name"),
+            "description": column.get("description", ""),
+        }
+        tests = _dbt_tests_from_rules(_normalize_rules(column))
+        if tests:
+            entry["tests"] = tests
+        rendered.append(entry)
+    return rendered
 
 
 def governance_to_dbt(doc: Dict[str, Any]) -> Tuple[str, str]:
@@ -49,14 +209,7 @@ def governance_to_dbt(doc: Dict[str, Any]) -> Tuple[str, str]:
             models.append(
                 {
                     "name": table.get("name"),
-                    "columns": [
-                        {
-                            "name": c.get("name"),
-                            "description": c.get("description", ""),
-                            "tests": _dbt_tests_from_rules(c.get("rules", {})),
-                        }
-                        for c in table.get("columns", [])
-                    ],
+                    "columns": _dbt_columns(table.get("columns", [])),
                 }
             )
         out = {"version": 2, "models": models}
@@ -74,14 +227,7 @@ def governance_to_dbt(doc: Dict[str, Any]) -> Tuple[str, str]:
             "tables": [
                 {
                     "name": ds.get("name"),
-                    "columns": [
-                        {
-                            "name": c.get("name"),
-                            "description": c.get("description", ""),
-                            "tests": _dbt_tests_from_rules(c.get("rules", {})),
-                        }
-                        for c in cols
-                    ],
+                    "columns": _dbt_columns(cols),
                 }
             ],
         }
@@ -93,14 +239,7 @@ def governance_to_dbt(doc: Dict[str, Any]) -> Tuple[str, str]:
     else:
         model = {
             "name": ds.get("name"),
-            "columns": [
-                {
-                    "name": c.get("name"),
-                    "description": c.get("description", ""),
-                    "tests": _dbt_tests_from_rules(c.get("rules", {})),
-                }
-                for c in cols
-            ],
+            "columns": _dbt_columns(cols),
         }
         out[root_key].append(model)
 
@@ -109,27 +248,30 @@ def governance_to_dbt(doc: Dict[str, Any]) -> Tuple[str, str]:
 
 
 def _ge_for_columns(name: str, columns: List[Dict[str, Any]]) -> str:
+    """Build a Great Expectations suite YAML for the supplied ``columns``."""
     expectations: List[Dict[str, Any]] = []
-    for c in columns:
-        col_name = c.get("name")
-        rules = c.get("rules", {})
+    for column in columns:
+        column_name = column.get("name")
+        rules = _normalize_rules(column)
+
         if rules.get("not_null"):
             expectations.append(
                 {
                     "expectation_type": "expect_column_values_to_not_be_null",
-                    "kwargs": {"column": col_name},
+                    "kwargs": {"column": column_name},
                 }
             )
         if rules.get("unique"):
             expectations.append(
                 {
                     "expectation_type": "expect_column_values_to_be_unique",
-                    "kwargs": {"column": col_name},
+                    "kwargs": {"column": column_name},
                 }
             )
+
         if "accepted_range" in rules:
             r = rules["accepted_range"] or {}
-            kwargs: Dict[str, Any] = {"column": col_name}
+            kwargs: Dict[str, Any] = {"column": column_name}
             if "min" in r:
                 kwargs["min_value"] = r["min"]
             if "max" in r:
@@ -140,11 +282,12 @@ def _ge_for_columns(name: str, columns: List[Dict[str, Any]]) -> str:
                     "kwargs": kwargs,
                 }
             )
+
         if "regex" in rules:
             expectations.append(
                 {
                     "expectation_type": "expect_column_values_to_match_regex",
-                    "kwargs": {"column": col_name, "regex": rules["regex"]},
+                    "kwargs": {"column": column_name, "regex": rules["regex"]},
                 }
             )
     suite = {"expectation_suite_name": name, "expectations": expectations}

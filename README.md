@@ -8,6 +8,14 @@ place. The CLI supports two main workflows:
 2. **Emit dbt and Great Expectations (GE) artifacts** – read an
    authoritative schema/governance YAML and translate its rules into dbt
    tests and GE expectation suites.
+
+## 1. Infer schemas from raw data
+
+1. **Infer schemas from data files** – scan `./data` and write YAML
+   descriptions of tables.
+2. **Emit dbt and Great Expectations (GE) artifacts** – read an
+   authoritative schema/governance YAML and translate its rules into dbt
+   tests and GE expectation suites.
 ```bash
 python -m venv .venv
 .venv\Scripts\Activate.ps1  # or `source .venv/bin/activate` on Unix
@@ -51,6 +59,35 @@ tables:
           accepted_range: {min: 0, max: 120}
 ```
 
+
+You are not limited to the `rules:` mapping shown above. The emitter will
+also understand dbt-style `tests:`, a `constraints:` list, or inline hints
+such as `nullable: false`, `unique: true`, `min`/`max`, and
+`regex`/`pattern`. All of the forms below are equivalent and will produce
+the same dbt tests and GE expectations:
+
+```yaml
+columns:
+  - name: customer_id
+    tests: [not_null, unique]
+  - name: age
+    constraints:
+      - dbt_expectations.expect_column_values_to_be_between:
+          min_value: 0
+          max_value: 120
+  - name: score
+    constraints:
+      - range: {min: 0, max: 1}
+  - name: email
+    nullable: false
+    constraints:
+      - regex:
+          pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+  - name: height
+    min: 0
+    max: 250
+```
+
 Then emit dbt v2 YAML and GE expectation suites from this single
 definition:
 
@@ -78,5 +115,4 @@ Artifacts are written to:
 This workflow keeps your validation logic in one neutral YAML file
 while producing artifacts for both warehouse‑side (dbt) and landing
 zone (GE) checks.
-
 

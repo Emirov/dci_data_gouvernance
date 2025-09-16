@@ -1,11 +1,13 @@
+"""Tests for schema inference and output writing utilities."""
 
 from pathlib import Path
-import yaml
+
 import pandas as pd
+import yaml
 from schema_yaml.inspector import inspect_folder, render_yaml, write_outputs
 
-
 def test_inspect_folder(tmp_path: Path):
+    """Inspect a folder containing CSVs and ensure schemas are collected."""
     work = tmp_path / "data"
     work.mkdir()
     (work / "customers.csv").write_text("customer_id,email\n1,test@example.com\n", encoding="utf-8")
@@ -17,7 +19,10 @@ def test_inspect_folder(tmp_path: Path):
     cust = dict(pairs)["customers"]
     assert "customer_id" in cust and "email" in cust
 
+
 def test_render_yaml_roundtrip():
+    """Render YAML for a schema and ensure it round-trips via yaml.safe_load."""
+
     schema = {"id": "integer", "email": "string", "created_at": "datetime"}
     ytext = render_yaml("users", schema)
     doc = yaml.safe_load(ytext)
@@ -25,7 +30,10 @@ def test_render_yaml_roundtrip():
     cols = {c["name"]: c["type"] for c in doc["tables"][0]["columns"]}
     assert cols == schema
 
+
 def test_write_outputs(tmp_path: Path):
+    """Persist per-table schemas and combined summary YAML."""
+
     pairs = [
         ("customers", {"customer_id": "integer", "email": "string"}),
         ("orders", {"order_id": "integer", "amount": "float"}),
@@ -38,6 +46,8 @@ def test_write_outputs(tmp_path: Path):
 
 
 def test_config_mode(tmp_path: Path):
+    """Drive inspection via configuration definitions rather than discovery."""
+
     tmp_data = tmp_path / "data"
     tmp_data.mkdir()
     # create sample csv and xlsx
