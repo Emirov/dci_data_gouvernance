@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 import yaml
 
@@ -33,7 +33,6 @@ KNOWN_UNIQUE_KEYS = (
 
 def _first_value(mapping: Dict[str, Any], keys: Iterable[str]) -> Any:
     """Return the first non-null value within ``mapping`` for the given keys."""
-
     for key in keys:
         if key in mapping and mapping[key] is not None:
             return mapping[key]
@@ -42,7 +41,6 @@ def _first_value(mapping: Dict[str, Any], keys: Iterable[str]) -> Any:
 
 def _merge_range(target: Dict[str, Any], value: Any) -> None:
     """Normalize range-like inputs and merge them into ``target``."""
-
     if isinstance(value, dict):
         min_val = _first_value(value, ("min", "min_value", "gte", "lower_bound"))
         max_val = _first_value(value, ("max", "max_value", "lte", "upper_bound"))
@@ -67,7 +65,6 @@ def _merge_range(target: Dict[str, Any], value: Any) -> None:
 
 def _apply_rule(result: Dict[str, Any], key: str, value: Any) -> None:
     """Map a rule key/value pair into the normalized ``result`` dictionary."""
-
     if key is None:
         return
 
@@ -98,7 +95,6 @@ def _apply_rule(result: Dict[str, Any], key: str, value: Any) -> None:
 
 def _normalize_rules(column: Dict[str, Any]) -> Dict[str, Any]:
     """Flatten rule variants on ``column`` into a canonical dictionary."""
-
     result: Dict[str, Any] = {}
 
     # First, check for explicit rule collections.
@@ -130,7 +126,7 @@ def _normalize_rules(column: Dict[str, Any]) -> Dict[str, Any]:
         "min": _first_value(column, ("min", "min_value", "gte", "lower_bound")),
         "max": _first_value(column, ("max", "max_value", "lte", "upper_bound")),
     }
-    range_hint = {key: value for key, value in range_hint.items() if value is not None}
+    range_hint = {k: v for k, v in range_hint.items() if v is not None}
     if range_hint:
         existing = result.get("accepted_range", {})
         existing.update(range_hint)
@@ -145,7 +141,6 @@ def _normalize_rules(column: Dict[str, Any]) -> Dict[str, Any]:
 
 def _dbt_tests_from_rules(rules: Dict[str, Any]) -> List[Any]:
     """Create a dbt test configuration list for the given ``rules``."""
-
     tests: List[Any] = []
     if not rules:
         return tests
@@ -156,17 +151,15 @@ def _dbt_tests_from_rules(rules: Dict[str, Any]) -> List[Any]:
         tests.append("unique")
 
     if "accepted_range" in rules:
-        range_values = rules["accepted_range"] or {}
+        r = rules["accepted_range"] or {}
         params: Dict[str, Any] = {}
-        if "min" in range_values:
-            params["min_value"] = range_values["min"]
-        if "max" in range_values:
-            params["max_value"] = range_values["max"]
+        if "min" in r:
+            params["min_value"] = r["min"]
+        if "max" in r:
+            params["max_value"] = r["max"]
         if params:
             tests.append(
-                {
-                    "dbt_expectations.expect_column_values_to_be_between": params
-                }
+                {"dbt_expectations.expect_column_values_to_be_between": params}
             )
 
     if "regex" in rules:
@@ -177,13 +170,11 @@ def _dbt_tests_from_rules(rules: Dict[str, Any]) -> List[Any]:
                 }
             }
         )
-
     return tests
 
 
 def _dbt_columns(columns: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Build the list of dbt column dictionaries with attached tests."""
-
     rendered: List[Dict[str, Any]] = []
     for column in columns:
         entry: Dict[str, Any] = {
@@ -197,9 +188,21 @@ def _dbt_columns(columns: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rendered
 
 
-def governance_to_dbt(doc: Dict[str, Any]) -> tuple[str, str]:
-    """Return the dbt YAML payload and filename for a governance document."""
+def governance_to_dbt(doc: Dict[str, Any]) -> Tuple[str, str]:
+    """Return (yaml_text, filename) for dbt from governance-style doc.
 
+    Supports two shapes:
+      1) Multi-table governance file:
+         { "tables": [ { "name": ..., "columns": [...]} ] }
+         -> returns schema.yml (models entries)
+      2) Single dataset governance file:
+         {
+           "dataset": {"kind": "source"|"model", "name": ..., "domain": ..., "database": ..., "schema": ...},
+           "columns": [...]
+         }
+         -> returns sources.yml (if kind == source) or schema.yml (if kind != source)
+    """
+    # Case 1: Multi-table governance "tables" (treat as dbt models)
     if "tables" in doc:
         models = []
         for table in doc.get("tables", []):
@@ -209,50 +212,43 @@ def governance_to_dbt(doc: Dict[str, Any]) -> tuple[str, str]:
                     "columns": _dbt_columns(table.get("columns", [])),
                 }
             )
-        payload = {"version": 2, "models": models}
-        return (
-            yaml.safe_dump(payload, sort_keys=False, allow_unicode=True),
-            "schema.yml",
-        )
+        out = {"version": 2, "models": models}
+        return yaml.safe_dump(out, sort_keys=False, allow_unicode=True), "schema.yml"
 
-    dataset = doc.get("dataset", {})
-    columns = doc.get("columns", [])
-    root_key = "sources" if dataset.get("kind") == "source" else "models"
-    payload: Dict[str, Any] = {"version": 2, root_key: []}
+    # Case 2: Single dataset governance
+    ds = doc.get("dataset", {})
+    cols = doc.get("columns", [])
+    root_key = "sources" if ds.get("kind") == "source" else "models"
+    out: Dict[str, Any] = {"version": 2, root_key: []}
 
     if root_key == "sources":
-        source: Dict[str, Any] = {
-            "name": dataset.get("domain"),
+        src: Dict[str, Any] = {
+            "name": ds.get("domain"),
             "tables": [
                 {
-                    "name": dataset.get("name"),
-                    "columns": _dbt_columns(columns),
+                    "name": ds.get("name"),
+                    "columns": _dbt_columns(cols),
                 }
             ],
         }
-        if dataset.get("database"):
-            source["database"] = dataset["database"]
-        if dataset.get("schema"):
-            source["schema"] = dataset["schema"]
-        payload[root_key].append(source)
+        if ds.get("database"):
+            src["database"] = ds["database"]
+        if ds.get("schema"):
+            src["schema"] = ds["schema"]
+        out[root_key].append(src)
     else:
-        payload[root_key].append(
-            {
-                "name": dataset.get("name"),
-                "columns": _dbt_columns(columns),
-            }
-        )
+        model = {
+            "name": ds.get("name"),
+            "columns": _dbt_columns(cols),
+        }
+        out[root_key].append(model)
 
-    filename = "sources.yml" if root_key == "sources" else "schema.yml"
-    return (
-        yaml.safe_dump(payload, sort_keys=False, allow_unicode=True),
-        filename,
-    )
+    fname = "sources.yml" if root_key == "sources" else "schema.yml"
+    return yaml.safe_dump(out, sort_keys=False, allow_unicode=True), fname
 
 
 def _ge_for_columns(name: str, columns: List[Dict[str, Any]]) -> str:
     """Build a Great Expectations suite YAML for the supplied ``columns``."""
-
     expectations: List[Dict[str, Any]] = []
     for column in columns:
         column_name = column.get("name")
@@ -265,7 +261,6 @@ def _ge_for_columns(name: str, columns: List[Dict[str, Any]]) -> str:
                     "kwargs": {"column": column_name},
                 }
             )
-
         if rules.get("unique"):
             expectations.append(
                 {
@@ -275,12 +270,12 @@ def _ge_for_columns(name: str, columns: List[Dict[str, Any]]) -> str:
             )
 
         if "accepted_range" in rules:
-            range_values = rules["accepted_range"] or {}
-            kwargs = {"column": column_name}
-            if "min" in range_values:
-                kwargs["min_value"] = range_values["min"]
-            if "max" in range_values:
-                kwargs["max_value"] = range_values["max"]
+            r = rules["accepted_range"] or {}
+            kwargs: Dict[str, Any] = {"column": column_name}
+            if "min" in r:
+                kwargs["min_value"] = r["min"]
+            if "max" in r:
+                kwargs["max_value"] = r["max"]
             expectations.append(
                 {
                     "expectation_type": "expect_column_values_to_be_between",
@@ -292,55 +287,53 @@ def _ge_for_columns(name: str, columns: List[Dict[str, Any]]) -> str:
             expectations.append(
                 {
                     "expectation_type": "expect_column_values_to_match_regex",
-                    "kwargs": {
-                        "column": column_name,
-                        "regex": rules["regex"],
-                    },
+                    "kwargs": {"column": column_name, "regex": rules["regex"]},
                 }
             )
-
     suite = {"expectation_suite_name": name, "expectations": expectations}
     return yaml.safe_dump(suite, sort_keys=False, allow_unicode=True)
 
 
 def governance_to_ge(doc: Dict[str, Any]) -> Dict[str, str]:
-    """Return mapping of table names to Great Expectations suite YAML."""
+    """Return mapping of table name -> Great Expectations suite YAML.
 
+    Supports both:
+      - Multi-table governance (returns one suite per table)
+      - Single dataset governance (returns one suite for dataset name)
+    """
     if "tables" in doc:
-        suites: Dict[str, str] = {}
+        out: Dict[str, str] = {}
         for table in doc.get("tables", []):
-            suites[table.get("name")] = _ge_for_columns(
+            out[table.get("name")] = _ge_for_columns(
                 table.get("name"), table.get("columns", [])
             )
-        return suites
+        return out
 
-    dataset = doc.get("dataset", {})
-    return {
-        dataset.get("name"): _ge_for_columns(
-            dataset.get("name"), doc.get("columns", [])
-        )
-    }
+    ds = doc.get("dataset", {})
+    return {ds.get("name"): _ge_for_columns(ds.get("name"), doc.get("columns", []))}
 
 
 def emit_from_governance(path: Path, out_dir: Path, emit: List[str]) -> Path:
-    """Read a governance file and write dbt and/or GE outputs."""
+    """Read a governance YAML and emit dbt and/or GE YAML files.
 
-    # Load the governance spec once for shared downstream use.
-    document = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    Args:
+        path: Path to governance YAML input.
+        out_dir: Output directory.
+        emit: List including "dbt" and/or "ge".
+    """
+    doc = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate dbt assets when requested by the caller.
     if "dbt" in emit:
         dbt_dir = out_dir / "dbt"
         dbt_dir.mkdir(parents=True, exist_ok=True)
-        dbt_text, filename = governance_to_dbt(document)
-        dbt_dir.joinpath(filename).write_text(dbt_text, encoding="utf-8")
+        dbt_text, fname = governance_to_dbt(doc)
+        dbt_dir.joinpath(fname).write_text(dbt_text, encoding="utf-8")
 
-    # Generate Great Expectations suites when requested by the caller.
     if "ge" in emit:
         ge_dir = out_dir / "ge"
         ge_dir.mkdir(parents=True, exist_ok=True)
-        for name, text in governance_to_ge(document).items():
+        for name, text in governance_to_ge(doc).items():
             ge_dir.joinpath(f"{name}_suite.yml").write_text(text, encoding="utf-8")
 
     return out_dir

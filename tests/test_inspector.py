@@ -4,13 +4,10 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
-
 from schema_yaml.inspector import inspect_folder, render_yaml, write_outputs
-
 
 def test_inspect_folder(tmp_path: Path):
     """Inspect a folder containing CSVs and ensure schemas are collected."""
-
     work = tmp_path / "data"
     work.mkdir()
     (work / "customers.csv").write_text("customer_id,email\n1,test@example.com\n", encoding="utf-8")

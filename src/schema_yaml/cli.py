@@ -29,12 +29,14 @@ def main() -> None:
     parser.add_argument(
         "--emit", type=str, default="", help="Comma-separated outputs to emit (dbt,ge)"
     )
+
     parser.add_argument("--out", type=str, default="./out", help="Output folder for YAML")
     args = parser.parse_args()
 
     out_dir = Path(args.out)
 
     # Emit dbt and/or GE YAML when a governance file is supplied.
+
     if args.governance:
         emit = [e.strip() for e in args.emit.split(",") if e.strip()]
         if not emit:
@@ -43,11 +45,13 @@ def main() -> None:
         print(f"Governance emitted: {', '.join(emit)} -> {out_dir}")
         return
 
+
     # Otherwise inspect data sources and materialize inferred schemas.
     data_dir = Path(args.data)
     pairs = (
         inspect_from_config(Path(args.config)) if args.config else inspect_folder(data_dir)
     )
+
     write_outputs(pairs, out_dir)
 
     print(f"Scanned: {data_dir}")
