@@ -1,0 +1,22 @@
+version: 1
+dataset:
+  kind: source
+  domain: raw
+  name: customers
+  database: your_db   # optional
+  schema: your_schema # optional
+columns:
+  - name: customer_id
+    type: integer
+    description: Unique customer id
+    rules:
+      not_null: true
+      unique: true
+  - name: email
+    type: string
+    rules:
+      regex: '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'
+  - name: age
+    type: integer
+    rules:
+      accepted_range: {min: 0, max: 120}

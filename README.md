@@ -8,13 +8,11 @@ place. The CLI supports two main workflows:
 2. **Emit dbt and Great Expectations (GE) artifacts** – read an
    authoritative schema/governance YAML and translate its rules into dbt
    tests and GE expectation suites.
-
-## 1. Infer schemas from raw data
-
 ```bash
 python -m venv .venv
 .venv\Scripts\Activate.ps1  # or `source .venv/bin/activate` on Unix
 pip install -r requirements.txt
+$env:PYTHONPATH = "$PWD\src"
 python -m schema_yaml.cli --data ./data --out ./out
 # after editable install you can call:
 # schema-yaml --data ./data --out ./out
@@ -80,4 +78,5 @@ Artifacts are written to:
 This workflow keeps your validation logic in one neutral YAML file
 while producing artifacts for both warehouse‑side (dbt) and landing
 zone (GE) checks.
+
 
