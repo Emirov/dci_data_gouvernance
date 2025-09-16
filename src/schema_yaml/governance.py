@@ -22,7 +22,9 @@ def _dbt_tests_from_rules(rules: Dict[str, Any]) -> List[Any]:
             params["max_value"] = r["max"]
         tests.append({"dbt_expectations.expect_column_values_to_be_between": params})
     if "regex" in rules:
-        tests.append({"dbt_expectations.expect_column_values_to_match_regex": {"regex": rules["regex"]}})
+        tests.append(
+            {"dbt_expectations.expect_column_values_to_match_regex": {"regex": rules["regex"]}}
+        )
     return tests
 
 
@@ -159,7 +161,9 @@ def governance_to_ge(doc: Dict[str, Any]) -> Dict[str, str]:
     if "tables" in doc:
         out: Dict[str, str] = {}
         for table in doc.get("tables", []):
-            out[table.get("name")] = _ge_for_columns(table.get("name"), table.get("columns", []))
+            out[table.get("name")] = _ge_for_columns(
+                table.get("name"), table.get("columns", [])
+            )
         return out
 
     ds = doc.get("dataset", {})
